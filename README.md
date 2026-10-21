@@ -1,3 +1,5 @@
+<!-- markdownlint-disable MD033 -->
+
 # PP3 — API de Usuarios
 
 Microservicio independiente del proyecto de comercio electrónico de PP3, a cargo de Ignacio Vidal. Gestiona usuarios, autenticación, roles y persistencia del carrito.
@@ -9,13 +11,104 @@ Microservicio independiente del proyecto de comercio electrónico de PP3, a carg
 - **Alojamiento:** Render, mediante Docker.
 - **Base de datos:** MongoDB Atlas, base `ecommerce_users`, colección `users`.
 
+## Tecnologías utilizadas
+
+<table>
+  <tr>
+    <td align="center" width="120">
+      <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/javascript/javascript-original.svg" width="42" height="42" alt="JavaScript" />
+      <br />
+      <sub><b>JavaScript</b></sub>
+    </td>
+    <td align="center" width="120">
+      <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/nodejs/nodejs-original.svg" width="42" height="42" alt="Node.js" />
+      <br />
+      <sub><b>Node.js</b></sub>
+    </td>
+    <td align="center" width="120">
+      <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/express/express-original.svg" width="42" height="42" alt="Express" />
+      <br />
+      <sub><b>Express</b></sub>
+    </td>
+    <td align="center" width="120">
+      <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/mongodb/mongodb-original.svg" width="42" height="42" alt="MongoDB Atlas" />
+      <br />
+      <sub><b>MongoDB Atlas</b></sub>
+    </td>
+    <td align="center" width="120">
+      <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/docker/docker-original.svg" width="42" height="42" alt="Docker" />
+      <br />
+      <sub><b>Docker</b></sub>
+    </td>
+    <td align="center" width="120">
+      <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/github/github-original.svg" width="42" height="42" alt="GitHub" />
+      <br />
+      <sub><b>GitHub</b></sub>
+    </td>
+    <td align="center" width="120">
+      <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/git/git-original.svg" width="42" height="42" alt="Git" />
+      <br />
+      <sub><b>Git</b></sub>
+    </td>
+    <td align="center" width="120">
+      <img src="https://cdn.simpleicons.org/render/8A05FF" width="42" height="42" alt="Render" />
+      <br />
+      <sub><b>Render</b></sub>
+    </td>
+  </tr>
+</table>
+
+### Librerías y herramientas
+
+`Express` · `Mongoose` · `bcryptjs` · `jsonwebtoken` · `dotenv`  
+`node:test` · `npm` · `Docker`
+
+---
+
 ## Alcance y estado
 
 El servicio está desplegado y se comprobó su conexión con Atlas, el registro público con persistencia y el inicio de sesión del administrador en Render. En ejecución local también se comprobó la consulta del perfil con token y el rechazo de la misma consulta sin token.
 
 La integración con el API Gateway, el frontend y los otros microservicios está pendiente. Este repositorio contiene únicamente la API de Usuarios. Catálogo y Pedidos deben administrar sus propias bases; no necesitan acceso directo a MongoDB de Usuarios.
 
+## Arquitectura general del proyecto
+
+El diagrama presenta la arquitectura propuesta: un frontend con tienda y dashboard, un API Gateway y tres microservicios independientes, cada uno con su base de datos. El frontend se prevé en Vercel y el Gateway y las APIs en Render.
+
+Este repositorio implementa el componente **API Usuarios** del diagrama, con Node.js y Express, conectado exclusivamente a **MongoDB Atlas**. El nombre `ms-usuarios/` identifica el componente en el proyecto original; en este repositorio independiente su código está en la raíz, dentro de `src/`.
+
+La API de Usuarios y su base ya están desplegadas. El diagrama representa también componentes previstos del equipo; no implica que el Gateway, el frontend y las otras APIs ya estén desplegados o integrados.
+
+![Arquitectura general: frontend, API Gateway, APIs de Usuarios, Catálogo y Pedidos, y sus bases de datos](diagramas/diagArq.jpg)
+
+[Ver el diagrama de arquitectura en tamaño completo](diagramas/diagArq.jpg)
+
+---
+
 ## Estructura
+
+```text
+pp3-api-usuarios/
+├── scripts/
+│   ├── seed.js
+│   └── set-admin.js
+├── src/
+│   ├── app.js
+│   ├── server.js
+│   └── User.js
+├── test/
+│   └── app.test.js
+├── diagramas/
+│   └── diagArq.jpg
+├── .env.example
+├── .gitignore
+├── Dockerfile
+├── package-lock.json
+├── package.json
+└── README.md
+```
+
+El árbol muestra los archivos del servicio y la documentación incluida en esta entrega. El archivo `.env` se crea localmente y no se versiona. La carpeta `node_modules/` se genera al instalar dependencias y tampoco se sube a Git.
 
 | Archivo o carpeta | Responsabilidad |
 | --- | --- |
