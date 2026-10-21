@@ -110,22 +110,23 @@ pp3-api-usuarios/
 
 El árbol muestra los archivos del servicio y la documentación incluida en esta entrega. El archivo `.env` se crea localmente y no se versiona. La carpeta `node_modules/` se genera al instalar dependencias y tampoco se sube a Git.
 
-| Archivo o carpeta | Responsabilidad |
-| --- | --- |
-| `src/server.js` | Carga de configuración, conexión a MongoDB e inicio del servidor |
-| `src/app.js` | Rutas HTTP, autenticación, autorización y validaciones |
-| `src/User.js` | Modelo de usuario y carrito en Mongoose |
-| `scripts/seed.js` | Carga o actualización de las diez cuentas de demostración |
+| Archivo o carpeta      | Responsabilidad                                                                       |
+| ---------------------- | ------------------------------------------------------------------------------------- |
+| `src/server.js`        | Carga de configuración, conexión a MongoDB e inicio del servidor                      |
+| `src/app.js`           | Rutas HTTP, autenticación, autorización y validaciones                                |
+| `src/User.js`          | Modelo de usuario y carrito en Mongoose                                               |
+| `scripts/seed.js`      | Carga o actualización de las diez cuentas de demostración                             |
 | `scripts/set-admin.js` | Script auxiliar de administración de roles; revisar su implementación antes de usarlo |
-| `test/app.test.js` | Pruebas automatizadas de la aplicación |
-| `Dockerfile` | Construcción de la imagen del servicio |
-| `.env.example` | Referencia de configuración, sin credenciales reales |
+| `test/app.test.js`     | Pruebas automatizadas de la aplicación                                                |
+| `Dockerfile`           | Construcción de la imagen del servicio                                                |
+| `.env.example`         | Referencia de configuración, sin credenciales reales                                  |
 
 Los comandos se ejecutan desde la raíz del repositorio, donde se encuentra `package.json`.
 
 ## Ejecución local
 
-Requisito del proyecto: **Node.js 22 o superior** y npm. Se necesita un usuario de base de datos de Atlas y autorización de red para la IP desde la que se ejecuta el servicio.
+Requisito del proyecto: **Node.js 22 o superior** y npm.
+Se necesita un usuario de base de datos de Atlas y autorización de red para la IP desde la que se ejecuta el servicio.
 
 ```powershell
 git clone https://github.com/ignaci0vidal/pp3-api-usuarios.git
@@ -142,9 +143,14 @@ MONGODB_URI=mongodb+srv://USUARIO:CLAVE_CODIFICADA@HOST_ATLAS/ecommerce_users?au
 JWT_SECRET=REEMPLAZAR_POR_UN_SECRETO_ALEATORIO_DE_AL_MENOS_32_CARACTERES
 ```
 
-El ejemplo es una plantilla: reemplazar usuario, contraseña, host y secreto. Los caracteres reservados de la contraseña deben codificarse para una URI. El nombre `ecommerce_users` debe estar en la ruta de la conexión; `authSource=admin` identifica la base de autenticación y no cambia la base de datos de la aplicación.
+El ejemplo es una plantilla: reemplazar
 
-No subir `.env` a Git. `.env.example` debe contener solo valores de ejemplo. El archivo `.env` se usa localmente; en Render los valores se configuran como variables de entorno.
+- **USUARIO**,
+- **CLAVE_CODIFICADA**,
+- **host**
+- **REEMPLAZAR_POR_UN_SECRETO_ALEATORIO_DE_AL_MENOS_32_CARACTERES**.
+
+Los caracteres reservados de la contraseña deben codificarse para una URI. El nombre `ecommerce_users` debe estar en la ruta de la conexión; `authSource=admin` identifica la base de autenticación y no cambia la base de datos de la aplicación.
 
 ```powershell
 npm start
@@ -174,18 +180,18 @@ El script usa `MONGODB_URI` del entorno local. Si apunta a Atlas, carga los dato
 
 Todas las cuentas de esta demostración usan la contraseña **`demo1234`** por decisión del equipo para la presentación académica.
 
-| Nombre | Email | Rol |
-| --- | --- | --- |
-| Administrador Demo | `admin@example.com` | `admin` |
-| Cliente Demo | `cliente@example.com` | `client` |
-| Lionel Messi | `lionel.messi@example.com` | `client` |
-| Mirtha Legrand | `mirtha.legrand@example.com` | `client` |
-| Bizarrap Demo | `bizarrap@example.com` | `client` |
-| María Becerra | `maria.becerra@example.com` | `client` |
-| Ricardo Darín | `ricardo.darin@example.com` | `client` |
-| Taylor Swift | `taylor.swift@example.com` | `client` |
-| Zendaya Demo | `zendaya@example.com` | `client` |
-| Keanu Reeves | `keanu.reeves@example.com` | `client` |
+| Nombre             | Email                        | Rol      |
+| ------------------ | ---------------------------- | -------- |
+| Administrador Demo | `admin@example.com`          | `admin`  |
+| Cliente Demo       | `cliente@example.com`        | `client` |
+| Lionel Messi       | `lionel.messi@example.com`   | `client` |
+| Mirtha Legrand     | `mirtha.legrand@example.com` | `client` |
+| Bizarrap Demo      | `bizarrap@example.com`       | `client` |
+| María Becerra      | `maria.becerra@example.com`  | `client` |
+| Ricardo Darín      | `ricardo.darin@example.com`  | `client` |
+| Taylor Swift       | `taylor.swift@example.com`   | `client` |
+| Michael Jackson    | `m.jackson@example.com`      | `client` |
+| Keanu Reeves       | `keanu.reeves@example.com`   | `client` |
 
 El seed busca por email y realiza un `upsert`. No borra la colección ni usuarios ajenos a la lista, pero **sobrescribe nombre, apellido, teléfono, contraseña y rol** de las cuentas que coinciden. Conserva sus carritos existentes y crea un carrito vacío para cuentas nuevas. Las contraseñas se guardan como hashes bcrypt con costo 12.
 
@@ -199,20 +205,20 @@ En rutas protegidas, enviar:
 Authorization: Bearer TOKEN
 ```
 
-| Método | Ruta | Acceso | Resultado exitoso |
-| --- | --- | --- | --- |
-| GET | `/health` | Público | 200, estado de conexión |
-| POST | `/api/usuarios` | Público | 201, registro con rol `client` |
-| POST | `/api/sesiones` | Público | 201, JWT y datos del usuario |
-| GET | `/api/usuarios/me` | JWT | 200, perfil propio |
-| GET | `/api/usuarios/me/carrito` | JWT | 200, carrito propio |
-| PUT | `/api/usuarios/me/carrito` | JWT | 200, reemplazo del carrito propio |
-| GET | `/api/usuarios/admin-session` | JWT con rol `admin` | 200, datos extraídos del token |
-| GET | `/api/usuarios` | Administrador | 200, listado paginado |
-| POST | `/api/usuarios/admin` | Administrador | 201, alta con rol indicado |
-| GET | `/api/usuarios/:id` | Administrador | 200, usuario solicitado |
-| PUT | `/api/usuarios/:id` | Administrador | 200, actualización del usuario |
-| DELETE | `/api/usuarios/:id` | Administrador | 200, eliminación del usuario |
+| Método | Ruta                          | Acceso              | Resultado exitoso                 |
+| ------ | ----------------------------- | ------------------- | --------------------------------- |
+| GET    | `/health`                     | Público             | 200, estado de conexión           |
+| POST   | `/api/usuarios`               | Público             | 201, registro con rol `client`    |
+| POST   | `/api/sesiones`               | Público             | 201, JWT y datos del usuario      |
+| GET    | `/api/usuarios/me`            | JWT                 | 200, perfil propio                |
+| GET    | `/api/usuarios/me/carrito`    | JWT                 | 200, carrito propio               |
+| PUT    | `/api/usuarios/me/carrito`    | JWT                 | 200, reemplazo del carrito propio |
+| GET    | `/api/usuarios/admin-session` | JWT con rol `admin` | 200, datos extraídos del token    |
+| GET    | `/api/usuarios`               | Administrador       | 200, listado paginado             |
+| POST   | `/api/usuarios/admin`         | Administrador       | 201, alta con rol indicado        |
+| GET    | `/api/usuarios/:id`           | Administrador       | 200, usuario solicitado           |
+| PUT    | `/api/usuarios/:id`           | Administrador       | 200, actualización del usuario    |
+| DELETE | `/api/usuarios/:id`           | Administrador       | 200, eliminación del usuario      |
 
 ### Registro
 
@@ -314,17 +320,17 @@ Las rutas administrativas rechazan solicitudes sin token con **401**, y tokens v
 
 ## Modelo persistido
 
-| Campo | Tipo / uso |
-| --- | --- |
-| `_id` | ObjectId generado por MongoDB |
-| `legacyId` | Número opcional, índice único y disperso para compatibilidad |
-| `name`, `apellido` | Texto obligatorio |
-| `email` | Texto obligatorio, normalizado e índice único |
-| `telefono` | Texto o `null` |
-| `passwordHash` | Hash bcrypt obligatorio; excluido por defecto en consultas Mongoose |
-| `role` | `admin` o `client` |
-| `carrito` | Lista de referencias `productId` y cantidades `quantity` |
-| `createdAt`, `updatedAt` | Fechas administradas por Mongoose |
+| Campo                    | Tipo / uso                                                          |
+| ------------------------ | ------------------------------------------------------------------- |
+| `_id`                    | ObjectId generado por MongoDB                                       |
+| `legacyId`               | Número opcional, índice único y disperso para compatibilidad        |
+| `name`, `apellido`       | Texto obligatorio                                                   |
+| `email`                  | Texto obligatorio, normalizado e índice único                       |
+| `telefono`               | Texto o `null`                                                      |
+| `passwordHash`           | Hash bcrypt obligatorio; excluido por defecto en consultas Mongoose |
+| `role`                   | `admin` o `client`                                                  |
+| `carrito`                | Lista de referencias `productId` y cantidades `quantity`            |
+| `createdAt`, `updatedAt` | Fechas administradas por Mongoose                                   |
 
 Las respuestas públicas de usuario exponen `id`, `name`, `apellido`, `email`, `telefono` y `role`; no incluyen `passwordHash`.
 
@@ -347,16 +353,16 @@ El Gateway no necesita `MONGODB_URI` ni credenciales de Atlas. Actualmente esta 
 
 ## Configuración del despliegue utilizado
 
-| Campo | Configuración |
-| --- | --- |
-| Repositorio | `ignaci0vidal/pp3-api-usuarios` |
-| Rama | `main` |
-| Runtime | Docker |
-| Directorio raíz | Raíz del repositorio |
-| Región utilizada | Oregon |
-| Health Check Path | `/health` |
-| Variables | `MONGODB_URI`, `JWT_SECRET` |
-| Puerto | El proporcionado por Render mediante `PORT` |
+| Campo             | Configuración                               |
+| ----------------- | ------------------------------------------- |
+| Repositorio       | `ignaci0vidal/pp3-api-usuarios`             |
+| Rama              | `main`                                      |
+| Runtime           | Docker                                      |
+| Directorio raíz   | Raíz del repositorio                        |
+| Región utilizada  | Oregon                                      |
+| Health Check Path | `/health`                                   |
+| Variables         | `MONGODB_URI`, `JWT_SECRET`                 |
+| Puerto            | El proporcionado por Render mediante `PORT` |
 
 El despliegue se realizó en una instancia Free. Según el aviso mostrado por Render durante la configuración, puede suspenderse por inactividad y demorar la primera petición al reactivarse.
 
