@@ -211,6 +211,7 @@ Authorization: Bearer TOKEN
 | POST   | `/api/usuarios`               | Público             | 201, registro con rol `client`    |
 | POST   | `/api/sesiones`               | Público             | 201, JWT y datos del usuario      |
 | GET    | `/api/usuarios/me`            | JWT                 | 200, perfil propio                |
+| PATCH  | `/api/usuarios/me`            | JWT                 | 200, actualiza DNI, dirección y teléfono propios |
 | GET    | `/api/usuarios/me/carrito`    | JWT                 | 200, carrito propio               |
 | PUT    | `/api/usuarios/me/carrito`    | JWT                 | 200, reemplazo del carrito propio |
 | GET    | `/api/usuarios/admin-session` | JWT con rol `admin` | 200, datos extraídos del token    |
@@ -233,7 +234,9 @@ Content-Type: application/json
   "apellido": "Pérez",
   "email": "ana@example.com",
   "password": "ejemplo1234",
-  "telefono": "1100000010"
+  "telefono": "1100000010",
+  "dni": "12345678",
+  "direccion": "Av. Prueba 123, Buenos Aires"
 }
 ```
 
@@ -253,6 +256,8 @@ Respuesta **201 Created**:
     "apellido": "Pérez",
     "email": "ana@example.com",
     "telefono": "1100000010",
+    "dni": "12345678",
+    "direccion": "Av. Prueba 123, Buenos Aires",
     "role": "client"
   }
 }
@@ -278,6 +283,20 @@ Errores: **400** por campos faltantes, **401** por credenciales incorrectas y **
 ### Perfil y carrito
 
 `GET /api/usuarios/me` devuelve `{ "success": true, "user": { ... } }`. Consulta al usuario por `sub` del JWT y devuelve **404** si no existe.
+
+`dni` y `direccion` son opcionales para conservar las cuentas y registros anteriores. DNI es una cadena de 7 u 8 dígitos, sin puntos ni espacios interiores; no se acepta como número y no se impone unicidad. Dirección es un texto único de hasta 300 caracteres. Se recortan espacios exteriores. `null` o texto vacío limpia el campo; un campo omitido se conserva en las actualizaciones. Las cuentas sin estos datos se presentan con `null`. La validación comprueba formato, no identidad ni existencia de un domicilio.
+
+Para completar o editar el perfil propio, usar `PATCH /api/usuarios/me` con Bearer y JSON:
+
+```json
+{
+  "dni": "12345678",
+  "telefono": "1123456789",
+  "direccion": "Av. Prueba 123, Buenos Aires"
+}
+```
+
+Devuelve **200** con `{ "success": true, "user": { ... } }`. Solo admite esos tres campos; rechaza cuerpo vacío o campos adicionales con **400**. El teléfono debe ser texto de dígitos o `null`; texto vacío lo limpia. La identidad se toma del JWT, sin permitir cambiar rol, email, nombre ni otra cuenta. Token ausente, inválido o vencido produce **401**; cuenta inexistente, **404**. Los nuevos campos se incluyen en las respuestas de registro, sesión, perfil y administración, pero no se agregan al JWT. No se requiere migración ni recarga del seed: MongoDB admite documentos antiguos sin esos campos.
 
 `GET /api/usuarios/me/carrito` devuelve `{ "success": true, "carrito": [...] }`.
 
@@ -306,11 +325,11 @@ Este servicio persiste referencias y cantidades: **no verifica que el producto e
 
 `GET /api/usuarios?page=1&limit=10` devuelve `items` y `pagination`. El tamaño predeterminado es 10, con máximo 100. La paginación incluye `page`, `limit`, `totalItems`, `totalPages`, `hasPreviousPage` y `hasNextPage`.
 
-`POST /api/usuarios/admin` recibe `name`, `apellido`, `email`, `password`, `role` y `telefono`. `role` puede ser `admin` o `client`; por defecto es `client`. Incluir un apellido no vacío para satisfacer el modelo. Devuelve `{ "success": true, "usuario": { ... } }`.
+`POST /api/usuarios/admin` recibe `name`, `apellido`, `email`, `password`, `role`, `telefono` y, opcionalmente, `dni` y `direccion`. `role` puede ser `admin` o `client`; por defecto es `client`. Incluir un apellido no vacío para satisfacer el modelo. Devuelve `{ "success": true, "usuario": { ... } }`.
 
 `GET /api/usuarios/:id` devuelve el objeto público del usuario directamente, sin envoltorio `user` o `usuario`.
 
-`PUT /api/usuarios/:id` requiere `name`, `email` y `role`. Acepta `apellido` y `telefono`; si se omiten, conserva sus valores anteriores. No actualiza contraseñas. Devuelve `{ "success": true, "usuario": { ... } }`.
+`PUT /api/usuarios/:id` requiere `name`, `email` y `role`. Acepta `apellido`, `telefono`, `dni` y `direccion`; si se omiten, conserva sus valores anteriores. DNI y dirección comparten las mismas validaciones del registro. No actualiza contraseñas. Devuelve `{ "success": true, "usuario": { ... } }`.
 
 `DELETE /api/usuarios/:id` devuelve `{ "success": true, "message": "Usuario eliminado correctamente" }`. Impide que el administrador elimine su propio usuario con **400**.
 
@@ -327,12 +346,14 @@ Las rutas administrativas rechazan solicitudes sin token con **401**, y tokens v
 | `name`, `apellido`       | Texto obligatorio                                                   |
 | `email`                  | Texto obligatorio, normalizado e índice único                       |
 | `telefono`               | Texto o `null`                                                      |
+| `dni`                    | Texto opcional de 7 u 8 dígitos; predeterminado `null`                |
+| `direccion`              | Texto único opcional de hasta 300 caracteres; predeterminado `null`  |
 | `passwordHash`           | Hash bcrypt obligatorio; excluido por defecto en consultas Mongoose |
 | `role`                   | `admin` o `client`                                                  |
 | `carrito`                | Lista de referencias `productId` y cantidades `quantity`            |
 | `createdAt`, `updatedAt` | Fechas administradas por Mongoose                                   |
 
-Las respuestas públicas de usuario exponen `id`, `name`, `apellido`, `email`, `telefono` y `role`; no incluyen `passwordHash`.
+Las respuestas de usuario exponen `id`, `name`, `apellido`, `email`, `telefono`, `dni`, `direccion` y `role`; no incluyen `passwordHash`. Las rutas protegidas mantienen su control de acceso.
 
 ## Integración del futuro API Gateway
 
@@ -383,6 +404,14 @@ npm test -- test/app.test.js
 ```
 
 Se observaron cuatro pruebas aprobadas en ese archivo: registro público con rol cliente y sin exposición del hash; inicio de sesión con bcrypt y JWT con rol; rechazo de credenciales incorrectas; y conservación de campos omitidos en la actualización administrativa. Esto no equivale a cobertura completa de todas las rutas.
+
+La ampliación de perfil agrega pruebas HTTP de registro, sesión, consulta y edición de DNI y dirección, entradas inválidas, permisos, conservación y limpieza de campos. `test/profile-model.test.js` comprueba también el esquema real sin conexión a MongoDB. Las pruebas HTTP usan un modelo en memoria y no reemplazan una comprobación de persistencia en Atlas.
+
+### Contrato para el frontend del equipo
+
+El frontend debe registrar con `POST /api/usuarios` y campo `name` (no `nombre`), iniciar sesión con `POST /api/sesiones` y leer `token` y `user`. El perfil se consulta con `GET /api/usuarios/me` y se edita con `PATCH /api/usuarios/me`, ambos con Bearer. Los campos de respuesta son `name`, `role` y `direccion` como texto único. No se implementa un servicio separado `/api/clientes` ni un arreglo `direcciones`.
+
+El Gateway pendiente debe reenviar `/api/usuarios` y todos sus subrecursos, y `/api/sesiones`, conservando método (incluido PATCH), JSON, query y Authorization. Debe permitir CORS para el origen del frontend. Implementar estos cambios en Usuarios no crea ni configura el Gateway.
 
 ### Comprobación manual en Render
 

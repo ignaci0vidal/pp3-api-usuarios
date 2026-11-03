@@ -119,6 +119,8 @@ test('admin updates preserve profile fields omitted by the legacy form', async (
       email: 'cliente@example.com',
       password: 'password-segura',
       telefono: '1234567',
+      dni: '12345678',
+      direccion: 'Calle Prueba 123',
     }),
   });
   const adminToken = jwt.sign({ sub: 'admin-id', role: 'admin' }, jwtSecret);
@@ -136,4 +138,123 @@ test('admin updates preserve profile fields omitted by the legacy form', async (
   assert.equal(records.get(userId).name, 'Cliente actualizado');
   assert.equal(records.get(userId).apellido, 'Vidal');
   assert.equal(records.get(userId).telefono, '1234567');
+  assert.equal(records.get(userId).dni, '12345678');
+  assert.equal(records.get(userId).direccion, 'Calle Prueba 123');
+});
+
+const registration = {
+  name: 'Cliente', apellido: 'Demo', email: 'cliente@example.com', password: 'password-segura',
+};
+const jsonHeaders = { 'content-type': 'application/json' };
+const clientToken = () => jwt.sign({ sub: userId, role: 'client' }, jwtSecret);
+const adminToken = () => jwt.sign({ sub: 'admin-id', role: 'admin' }, jwtSecret);
+
+async function register(extra = {}) {
+  return fetch(`${baseUrl}/api/usuarios`, {
+    method: 'POST', headers: jsonHeaders, body: JSON.stringify({ ...registration, ...extra }),
+  });
+}
+
+test('registration, login and own profile round-trip DNI and address without placing them in JWT', async () => {
+  const response = await register({ dni: ' 01234567 ', direccion: ' Av. Prueba 123 ' });
+  assert.equal(response.status, 201);
+  const created = (await response.json()).user;
+  assert.equal(created.dni, '01234567');
+  assert.equal(created.direccion, 'Av. Prueba 123');
+  assert.equal(records.get(userId).dni, created.dni);
+  assert.equal(records.get(userId).direccion, created.direccion);
+  const session = await fetch(`${baseUrl}/api/sesiones`, {
+    method: 'POST', headers: jsonHeaders, body: JSON.stringify(registration),
+  });
+  assert.equal(session.status, 201);
+  const result = await session.json();
+  assert.equal(result.user.dni, created.dni);
+  const claims = jwt.verify(result.token, jwtSecret);
+  assert.equal(claims.dni, undefined);
+  assert.equal(claims.direccion, undefined);
+  const profile = await fetch(`${baseUrl}/api/usuarios/me`, { headers: { authorization: `Bearer ${result.token}` } });
+  assert.equal(profile.status, 200);
+  assert.deepEqual((await profile.json()).user, created);
+});
+
+test('legacy users expose null optional fields and can still log in', async () => {
+  assert.equal((await register()).status, 201);
+  delete records.get(userId).dni;
+  delete records.get(userId).direccion;
+  const response = await fetch(`${baseUrl}/api/sesiones`, {
+    method: 'POST', headers: jsonHeaders, body: JSON.stringify(registration),
+  });
+  assert.equal(response.status, 201);
+  const { user } = await response.json();
+  assert.equal(user.dni, null);
+  assert.equal(user.direccion, null);
+});
+
+test('both registration routes reject invalid DNI and address before persisting', async () => {
+  for (const route of ['/api/usuarios', '/api/usuarios/admin']) {
+    for (const fields of [{ dni: '123456' }, { dni: '12.345.678' }, { dni: 12345678 }, { dni: {} }, { direccion: [] }, { direccion: 'x'.repeat(301) }]) {
+      const response = await fetch(`${baseUrl}${route}`, {
+        method: 'POST', headers: { ...jsonHeaders, authorization: `Bearer ${adminToken()}` },
+        body: JSON.stringify({ ...registration, ...fields }),
+      });
+      assert.equal(response.status, 400, JSON.stringify({ route, fields }));
+      assert.equal(records.size, 0);
+    }
+  }
+});
+
+test('administrator can create, read, change and clear DNI and address', async () => {
+  const headers = { ...jsonHeaders, authorization: `Bearer ${adminToken()}` };
+  const created = await fetch(`${baseUrl}/api/usuarios/admin`, {
+    method: 'POST', headers, body: JSON.stringify({ ...registration, dni: '1234567', direccion: 'Calle 123' }),
+  });
+  assert.equal(created.status, 201);
+  assert.equal((await created.json()).usuario.dni, '1234567');
+  const read = await fetch(`${baseUrl}/api/usuarios/${userId}`, { headers });
+  assert.equal(read.status, 200);
+  assert.equal((await read.json()).direccion, 'Calle 123');
+  const update = await fetch(`${baseUrl}/api/usuarios/${userId}`, {
+    method: 'PUT', headers, body: JSON.stringify({ name: 'Cliente', email: registration.email, role: 'client', dni: '7654321', direccion: 'Calle 456' }),
+  });
+  assert.equal(update.status, 200);
+  assert.equal((await update.json()).usuario.dni, '7654321');
+  const invalid = await fetch(`${baseUrl}/api/usuarios/${userId}`, {
+    method: 'PUT', headers, body: JSON.stringify({ name: 'Cliente', email: registration.email, role: 'client', dni: 'no' }),
+  });
+  assert.equal(invalid.status, 400);
+  assert.equal(records.get(userId).dni, '7654321');
+  const cleared = await fetch(`${baseUrl}/api/usuarios/${userId}`, {
+    method: 'PUT', headers, body: JSON.stringify({ name: 'Cliente', email: registration.email, role: 'client', dni: null, direccion: ' ' }),
+  });
+  assert.equal(cleared.status, 200);
+  const user = (await cleared.json()).usuario;
+  assert.equal(user.dni, null);
+  assert.equal(user.direccion, null);
+});
+
+test('own profile update authenticates and only modifies allowed fields on token owner', async () => {
+  await register({ dni: '12345678', direccion: 'Dirección anterior', telefono: '1234' });
+  const patch = (body, token) => fetch(`${baseUrl}/api/usuarios/me`, {
+    method: 'PATCH', headers: { ...jsonHeaders, ...(token ? { authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify(body),
+  });
+  assert.equal((await patch({ dni: '7654321' })).status, 401);
+  assert.equal((await patch({ dni: '7654321' }, 'invalid')).status, 401);
+  const expired = jwt.sign({ sub: userId, role: 'client' }, jwtSecret, { expiresIn: -1 });
+  assert.equal((await patch({ dni: '7654321' }, expired)).status, 401);
+  for (const body of [{}, { role: 'admin' }, { dni: '7654321', id: 'another-user' }, { dni: 'abc' }, { direccion: 'x'.repeat(301) }, { telefono: {} }]) {
+    assert.equal((await patch(body, clientToken())).status, 400);
+  }
+  assert.equal(records.get(userId).dni, '12345678');
+  assert.equal(records.get(userId).role, 'client');
+  const response = await patch({ direccion: ' Nueva dirección ', telefono: '5678' }, clientToken());
+  assert.equal(response.status, 200);
+  const user = (await response.json()).user;
+  assert.equal(user.direccion, 'Nueva dirección');
+  assert.equal(user.dni, '12345678');
+  assert.equal(user.telefono, '5678');
+  const clear = await patch({ dni: '', direccion: null }, clientToken());
+  assert.equal(clear.status, 200);
+  assert.equal((await clear.json()).user.dni, null);
+  const missing = jwt.sign({ sub: '507f1f77bcf86cd799439012', role: 'client' }, jwtSecret);
+  assert.equal((await patch({ dni: '7654321' }, missing)).status, 404);
 });

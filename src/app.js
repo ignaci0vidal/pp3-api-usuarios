@@ -3,6 +3,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const mongoose = require('mongoose');
 const User = require('./User');
+const { validateProfileFields } = require('./profileFields');
 
 function authorizeAdmin(req, res, next) {
   const token = req.get('authorization')?.match(/^Bearer (.+)$/)?.[1];
@@ -26,6 +27,8 @@ function publicUser(user) {
     apellido: user.apellido,
     email: user.email,
     telefono: user.telefono,
+    dni: user.dni ?? null,
+    direccion: user.direccion ?? null,
     role: user.role,
   };
 }
@@ -55,6 +58,8 @@ function createApp({ UserModel = User, connectionState = () => mongoose.connecti
     if (telefono != null && telefono !== '' && !/^\d+$/.test(String(telefono))) {
       return res.status(400).json({ success: false, message: 'El teléfono debe contener solo números' });
     }
+    const profile = validateProfileFields(req.body || {});
+    if (profile.error) return res.status(400).json({ success: false, message: profile.error });
 
     try {
       const passwordHash = await bcrypt.hash(password, 12);
@@ -63,6 +68,7 @@ function createApp({ UserModel = User, connectionState = () => mongoose.connecti
         apellido: apellido.trim(),
         email: normalizedEmail,
         telefono: telefono ? String(telefono).trim() : null,
+        ...profile.fields,
         passwordHash,
         role: 'client',
       });
@@ -121,6 +127,36 @@ function createApp({ UserModel = User, connectionState = () => mongoose.connecti
       }
       console.error('Profile lookup failed:', error);
       return res.status(500).json({ success: false, message: 'Error al consultar el perfil' });
+    }
+  });
+
+  app.patch('/api/usuarios/me', async (req, res) => {
+    const token = req.get('authorization')?.match(/^Bearer (.+)$/)?.[1];
+    if (!token) return res.status(401).json({ success: false, message: 'Autenticación requerida' });
+    try {
+      const claims = jwt.verify(token, process.env.JWT_SECRET);
+      const body = req.body || {};
+      const allowed = ['dni', 'direccion', 'telefono'];
+      if (!Object.keys(body).length || Object.keys(body).some((key) => !allowed.includes(key))) {
+        return res.status(400).json({ success: false, message: 'Solo se permite actualizar DNI, dirección y teléfono' });
+      }
+      const profile = validateProfileFields(body);
+      if (profile.error) return res.status(400).json({ success: false, message: profile.error });
+      if (body.telefono !== undefined) {
+        if (body.telefono !== null && (typeof body.telefono !== 'string' || !/^\d*$/.test(body.telefono.trim()))) {
+          return res.status(400).json({ success: false, message: 'El teléfono debe ser texto con solo números' });
+        }
+        profile.fields.telefono = body.telefono?.trim() || null;
+      }
+      const user = await UserModel.findByIdAndUpdate(claims.sub, { $set: profile.fields }, { new: true, runValidators: true });
+      if (!user) return res.status(404).json({ success: false, message: 'Usuario no encontrado' });
+      return res.json({ success: true, user: publicUser(user) });
+    } catch (error) {
+      if (error.name === 'JsonWebTokenError' || error.name === 'TokenExpiredError') {
+        return res.status(401).json({ success: false, message: 'Token inválido o expirado' });
+      }
+      console.error('Profile update failed:', error);
+      return res.status(500).json({ success: false, message: 'Error al actualizar el perfil' });
     }
   });
 
@@ -218,6 +254,8 @@ function createApp({ UserModel = User, connectionState = () => mongoose.connecti
       || !['admin', 'client'].includes(role)) {
       return res.status(400).json({ message: 'Datos de usuario inválidos' });
     }
+    const profile = validateProfileFields(req.body || {});
+    if (profile.error) return res.status(400).json({ message: profile.error });
     try {
       const user = await UserModel.create({
         name: name.trim(),
@@ -226,6 +264,7 @@ function createApp({ UserModel = User, connectionState = () => mongoose.connecti
         passwordHash: await bcrypt.hash(password, 12),
         role,
         telefono: telefono ? String(telefono) : null,
+        ...profile.fields,
       });
       return res.status(201).json({ success: true, usuario: publicUser(user) });
     } catch (error) {
@@ -255,6 +294,8 @@ function createApp({ UserModel = User, connectionState = () => mongoose.connecti
       || !['admin', 'client'].includes(role)) {
       return res.status(400).json({ message: 'Datos de usuario inválidos' });
     }
+    const profile = validateProfileFields(req.body || {});
+    if (profile.error) return res.status(400).json({ message: profile.error });
     try {
       const user = await UserModel.findByIdAndUpdate(req.params.id, {
         $set: {
@@ -263,6 +304,7 @@ function createApp({ UserModel = User, connectionState = () => mongoose.connecti
           role,
           ...(apellido === undefined ? {} : { apellido: String(apellido).trim() }),
           ...(telefono === undefined ? {} : { telefono: telefono ? String(telefono) : null }),
+          ...profile.fields,
         },
       }, { new: true, runValidators: true });
       if (!user) return res.status(404).json({ message: 'Usuario no encontrado' });
