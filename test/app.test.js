@@ -145,6 +145,56 @@ test('admin updates preserve profile fields omitted by the legacy form', async (
 const registration = {
   name: 'Cliente', apellido: 'Demo', email: 'cliente@example.com', password: 'password-segura',
 };
+
+test('newly registered user has one readable profile before and after completing registration', async () => {
+  const created = await register();
+  assert.equal(created.status, 201);
+  const id = (await created.json()).user.id;
+  const headers = { ...jsonHeaders, authorization: `Bearer ${clientToken()}` };
+  const initial = await fetch(`${baseUrl}/api/usuarios/me`, { headers });
+  assert.equal(initial.status, 200);
+  const before = (await initial.json()).user;
+  assert.equal(before.id, id);
+  assert.equal(before.dni, null);
+  assert.equal(before.direccion, null);
+  const body = { name: ' Cliente actualizado ', apellido: ' Prueba ', dni: '12345678', telefono: '1123456789', direccion: 'Calle Prueba 123' };
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const updated = await fetch(`${baseUrl}/api/usuarios/me`, { method: 'PUT', headers, body: JSON.stringify(body) });
+    assert.equal(updated.status, 200);
+    const user = (await updated.json()).user;
+    assert.equal(user.id, id);
+    assert.equal(user.name, 'Cliente actualizado');
+    assert.equal(user.apellido, 'Prueba');
+    assert.equal(user.dni, body.dni);
+    assert.equal(user.role, 'client');
+  }
+  assert.equal(records.size, 1);
+  const restored = await fetch(`${baseUrl}/api/usuarios/me`, { headers });
+  assert.equal(restored.status, 200);
+  assert.equal((await restored.json()).user.direccion, body.direccion);
+});
+
+test('profile returns 401 for invalid sessions and 404 only for nonexistent account', async () => {
+  await register();
+  for (const token of [undefined, 'invalid', jwt.sign({ sub: userId }, jwtSecret, { expiresIn: -1 })]) {
+    const response = await fetch(`${baseUrl}/api/usuarios/me`, {
+      headers: token ? { authorization: `Bearer ${token}` } : {},
+    });
+    assert.equal(response.status, 401);
+  }
+  const token = jwt.sign({ sub: '507f1f77bcf86cd799439012' }, jwtSecret);
+  const response = await fetch(`${baseUrl}/api/usuarios/me`, { headers: { authorization: `Bearer ${token}` } });
+  assert.equal(response.status, 404);
+  assert.equal((await response.json()).message, 'Usuario no encontrado');
+});
+
+test('URLs with verbs and separate customer resources are no longer endpoints', async () => {
+  for (const [method, path] of [['POST', '/api/usuarios/auth/register'], ['POST', '/api/usuarios/auth/login'], ['POST', '/api/clientes'], ['GET', '/api/clientes/perfil'], ['PATCH', '/api/usuarios/me']]) {
+    const response = await fetch(`${baseUrl}${path}`, { method, headers: jsonHeaders });
+    assert.equal(response.status, 404);
+    assert.equal((await response.json()).message, 'Ruta no encontrada');
+  }
+});
 const jsonHeaders = { 'content-type': 'application/json' };
 const clientToken = () => jwt.sign({ sub: userId, role: 'client' }, jwtSecret);
 const adminToken = () => jwt.sign({ sub: 'admin-id', role: 'admin' }, jwtSecret);
@@ -234,117 +284,27 @@ test('administrator can create, read, change and clear DNI and address', async (
 
 test('own profile update authenticates and only modifies allowed fields on token owner', async () => {
   await register({ dni: '12345678', direccion: 'Dirección anterior', telefono: '1234' });
-  const patch = (body, token) => fetch(`${baseUrl}/api/usuarios/me`, {
-    method: 'PATCH', headers: { ...jsonHeaders, ...(token ? { authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify(body),
+  const put = (body, token) => fetch(`${baseUrl}/api/usuarios/me`, {
+    method: 'PUT', headers: { ...jsonHeaders, ...(token ? { authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify(body),
   });
-  assert.equal((await patch({ dni: '7654321' })).status, 401);
-  assert.equal((await patch({ dni: '7654321' }, 'invalid')).status, 401);
+  assert.equal((await put({ dni: '7654321' })).status, 401);
+  assert.equal((await put({ dni: '7654321' }, 'invalid')).status, 401);
   const expired = jwt.sign({ sub: userId, role: 'client' }, jwtSecret, { expiresIn: -1 });
-  assert.equal((await patch({ dni: '7654321' }, expired)).status, 401);
+  assert.equal((await put({ dni: '7654321' }, expired)).status, 401);
   for (const body of [{}, { role: 'admin' }, { dni: '7654321', id: 'another-user' }, { dni: 'abc' }, { direccion: 'x'.repeat(301) }, { telefono: {} }]) {
-    assert.equal((await patch(body, clientToken())).status, 400);
+    assert.equal((await put(body, clientToken())).status, 400);
   }
   assert.equal(records.get(userId).dni, '12345678');
   assert.equal(records.get(userId).role, 'client');
-  const response = await patch({ direccion: ' Nueva dirección ', telefono: '5678' }, clientToken());
+  const response = await put({ direccion: ' Nueva dirección ', telefono: '5678' }, clientToken());
   assert.equal(response.status, 200);
   const user = (await response.json()).user;
   assert.equal(user.direccion, 'Nueva dirección');
   assert.equal(user.dni, '12345678');
   assert.equal(user.telefono, '5678');
-  const clear = await patch({ dni: '', direccion: null }, clientToken());
+  const clear = await put({ dni: '', direccion: null }, clientToken());
   assert.equal(clear.status, 200);
   assert.equal((await clear.json()).user.dni, null);
   const missing = jwt.sign({ sub: '507f1f77bcf86cd799439012', role: 'client' }, jwtSecret);
-  assert.equal((await patch({ dni: '7654321' }, missing)).status, 404);
-});
-
-test('reference storefront can register with nombre and log in with usuario.nombre and usuario.rol', async () => {
-  const created = await fetch(`${baseUrl}/api/usuarios/auth/register`, {
-    method: 'POST', headers: jsonHeaders,
-    body: JSON.stringify({ nombre: 'Ana', apellido: 'Prueba', email: 'ana@example.com', password: 'password-segura', role: 'admin' }),
-  });
-  assert.equal(created.status, 201);
-  assert.equal((await created.json()).user.role, 'client');
-  const response = await fetch(`${baseUrl}/api/usuarios/auth/login`, {
-    method: 'POST', headers: jsonHeaders,
-    body: JSON.stringify({ email: 'ana@example.com', password: 'password-segura' }),
-  });
-  assert.equal(response.status, 201);
-  const data = await response.json();
-  assert.equal(data.usuario.nombre, 'Ana');
-  assert.equal(data.usuario.rol, 'client');
-  assert.equal(data.usuario.id, userId);
-  assert.equal(jwt.verify(data.token, jwtSecret).sub, userId);
-  assert.equal(JSON.stringify(data).includes('passwordHash'), false);
-});
-
-test('reference customer form completes the same account and profile maps a single address to direcciones', async () => {
-  await register();
-  const headers = { ...jsonHeaders, authorization: `Bearer ${clientToken()}` };
-  const initial = await fetch(`${baseUrl}/api/clientes/perfil`, { headers });
-  assert.equal(initial.status, 404); // Existing storefront shows its form on 404.
-  assert.match((await initial.json()).message, /no encontrado/);
-  const response = await fetch(`${baseUrl}/api/clientes`, {
-    method: 'POST', headers,
-    body: JSON.stringify({ nombre: 'Cliente', apellido: 'Prueba', dni: '12345678', telefono: '1123456789', role: 'admin', userId: 'another-account' }),
-  });
-  assert.equal(response.status, 200);
-  assert.equal(records.size, 1);
-  assert.equal(records.get(userId).role, 'client');
-  assert.equal(records.get(userId).email, registration.email);
-  assert.ok(records.get(userId).passwordHash);
-  const completed = await fetch(`${baseUrl}/api/clientes/perfil`, { headers });
-  assert.equal(completed.status, 200);
-  const result = await completed.json();
-  assert.equal(result.dni, '12345678');
-  assert.equal(result.telefono, '1123456789');
-  assert.deepEqual(result.direcciones, []);
-  assert.equal(result.nombre, 'Cliente');
-  assert.equal(result.rol, 'client');
-  await fetch(`${baseUrl}/api/usuarios/me`, {
-    method: 'PATCH', headers, body: JSON.stringify({ direccion: 'Av. Prueba 123, Buenos Aires' }),
-  });
-  const withAddress = await fetch(`${baseUrl}/api/clientes/perfil`, { headers });
-  const address = (await withAddress.json()).direcciones[0];
-  assert.equal(address.calle, records.get(userId).direccion);
-  assert.equal(address.esPredeterminada, true);
-  // Omitted optional fields are preserved when the old form is submitted again.
-  await fetch(`${baseUrl}/api/clientes`, {
-    method: 'POST', headers, body: JSON.stringify({ nombre: 'Cliente', apellido: 'Prueba', dni: '12345678' }),
-  });
-  assert.equal(records.get(userId).telefono, '1123456789');
-  assert.equal(records.get(userId).direccion, 'Av. Prueba 123, Buenos Aires');
-});
-
-test('customer compatibility routes require a valid session and never select another account from the body', async () => {
-  await register();
-  for (const [method, route] of [['GET', '/api/clientes/perfil'], ['POST', '/api/clientes']]) {
-    for (const token of [undefined, 'invalid', jwt.sign({ sub: userId }, jwtSecret, { expiresIn: -1 })]) {
-      const response = await fetch(`${baseUrl}${route}`, {
-        method, headers: { ...jsonHeaders, ...(token ? { authorization: `Bearer ${token}` } : {}) },
-        ...(method === 'POST' ? { body: '{}' } : {}),
-      });
-      assert.equal(response.status, 401);
-    }
-  }
-  const missing = jwt.sign({ sub: '507f1f77bcf86cd799439012', role: 'client' }, jwtSecret);
-  const response = await fetch(`${baseUrl}/api/clientes`, {
-    method: 'POST', headers: { ...jsonHeaders, authorization: `Bearer ${missing}` },
-    body: JSON.stringify({ nombre: 'Intruso', apellido: 'Prueba', dni: '12345678', id: userId }),
-  });
-  assert.equal(response.status, 404);
-  assert.equal(records.get(userId).name, registration.name);
-});
-
-test('customer profile validates DNI, address, name and phone before updating', async () => {
-  await register();
-  const valid = { nombre: 'Cliente', apellido: 'Prueba', dni: '12345678' };
-  for (const body of [{ ...valid, dni: '' }, { ...valid, dni: '12.345.678' }, { ...valid, direccion: {} }, { ...valid, direccion: 'x'.repeat(301) }, { ...valid, nombre: ' ' }, { ...valid, telefono: '12abc' }]) {
-    const response = await fetch(`${baseUrl}/api/clientes`, {
-      method: 'POST', headers: { ...jsonHeaders, authorization: `Bearer ${clientToken()}` }, body: JSON.stringify(body),
-    });
-    assert.equal(response.status, 400);
-  }
-  assert.equal(records.get(userId).dni, undefined);
+  assert.equal((await put({ dni: '7654321' }, missing)).status, 404);
 });

@@ -211,7 +211,7 @@ Authorization: Bearer TOKEN
 | POST   | `/api/usuarios`               | Público             | 201, registro con rol `client`    |
 | POST   | `/api/sesiones`               | Público             | 201, JWT y datos del usuario      |
 | GET    | `/api/usuarios/me`            | JWT                 | 200, perfil propio                |
-| PATCH  | `/api/usuarios/me`            | JWT                 | 200, actualiza DNI, dirección y teléfono propios |
+| PUT  | `/api/usuarios/me`            | JWT                 | 200, actualiza DNI, dirección y teléfono propios |
 | GET    | `/api/usuarios/me/carrito`    | JWT                 | 200, carrito propio               |
 | PUT    | `/api/usuarios/me/carrito`    | JWT                 | 200, reemplazo del carrito propio |
 | GET    | `/api/usuarios/admin-session` | JWT con rol `admin` | 200, datos extraídos del token    |
@@ -286,7 +286,7 @@ Errores: **400** por campos faltantes, **401** por credenciales incorrectas y **
 
 `dni` y `direccion` son opcionales para conservar las cuentas y registros anteriores. DNI es una cadena de 7 u 8 dígitos, sin puntos ni espacios interiores; no se acepta como número y no se impone unicidad. Dirección es un texto único de hasta 300 caracteres. Se recortan espacios exteriores. `null` o texto vacío limpia el campo; un campo omitido se conserva en las actualizaciones. Las cuentas sin estos datos se presentan con `null`. La validación comprueba formato, no identidad ni existencia de un domicilio.
 
-Para completar o editar el perfil propio, usar `PATCH /api/usuarios/me` con Bearer y JSON:
+Para completar o editar el perfil propio, usar `PUT /api/usuarios/me` con Bearer y JSON:
 
 ```json
 {
@@ -296,7 +296,7 @@ Para completar o editar el perfil propio, usar `PATCH /api/usuarios/me` con Bear
 }
 ```
 
-Devuelve **200** con `{ "success": true, "user": { ... } }`. Solo admite esos tres campos; rechaza cuerpo vacío o campos adicionales con **400**. El teléfono debe ser texto de dígitos o `null`; texto vacío lo limpia. La identidad se toma del JWT, sin permitir cambiar rol, email, nombre ni otra cuenta. Token ausente, inválido o vencido produce **401**; cuenta inexistente, **404**. Los nuevos campos se incluyen en las respuestas de registro, sesión, perfil y administración, pero no se agregan al JWT. No se requiere migración ni recarga del seed: MongoDB admite documentos antiguos sin esos campos.
+Devuelve **200** con `{ "success": true, "user": { ... } }`. Admite `name`, `apellido`, `dni`, `telefono` y `direccion`; rechaza cuerpo vacío o campos adicionales con **400**. El teléfono debe ser texto de dígitos o `null`; texto vacío lo limpia. La identidad se toma del JWT, sin permitir cambiar rol, email ni otra cuenta. Token ausente, inválido o vencido produce **401**; cuenta inexistente, **404**. Los nuevos campos se incluyen en las respuestas de registro, sesión, perfil y administración, pero no se agregan al JWT. No se requiere migración ni recarga del seed: MongoDB admite documentos antiguos sin esos campos.
 
 `GET /api/usuarios/me/carrito` devuelve `{ "success": true, "carrito": [...] }`.
 
@@ -407,26 +407,26 @@ Se observaron cuatro pruebas aprobadas en ese archivo: registro público con rol
 
 La ampliación de perfil agrega pruebas HTTP de registro, sesión, consulta y edición de DNI y dirección, entradas inválidas, permisos, conservación y limpieza de campos. `test/profile-model.test.js` comprueba también el esquema real sin conexión a MongoDB. Las pruebas HTTP usan un modelo en memoria y no reemplazan una comprobación de persistencia en Atlas.
 
-### Contrato para el frontend del equipo
+### Contrato unificado después de la corrección del docente
 
-El contrato original se conserva: registro con `POST /api/usuarios` y `name`, sesión con `POST /api/sesiones` y respuesta `token` y `user`, y perfil con `GET /api/usuarios/me` y `PATCH /api/usuarios/me`. Los campos originales siguen siendo `name`, `role` y `direccion` como texto único.
+Usuario, cliente y perfil representan la misma cuenta desde el registro. No existe un alta posterior de cliente ni se exige DNI para consultar el perfil.
 
-Para que el frontend de referencia no necesite cambiar sus llamadas, esta misma API agrega:
-
-| Método | Ruta compatible | Comportamiento |
+| Operación | Método y recurso | Respuesta |
 | --- | --- | --- |
-| POST | `/api/usuarios/auth/register` | Acepta `nombre`, `apellido`, `email` y `password`; siempre registra `client` |
-| POST | `/api/usuarios/auth/login` | Mismo login; agrega `usuario` con `nombre` y `rol`, manteniendo `token` y `user` |
-| GET | `/api/clientes/perfil` | Bearer; devuelve el perfil directamente con DNI, teléfono y `direcciones` |
-| POST | `/api/clientes` | Bearer; completa el usuario autenticado con `nombre`, `apellido`, `dni`, y opcionalmente `telefono` y `direccion`; devuelve 200 |
+| Registro | `POST /api/usuarios` | 201, `{success, message, user}` |
+| Inicio de sesión | `POST /api/sesiones` | 201, `{success, message, token, user}` |
+| Consulta propia | `GET /api/usuarios/me` | 200, `{success, user}`, con Bearer |
+| Completar o actualizar datos propios | `PUT /api/usuarios/me` | 200, `{success, user}`, con Bearer |
 
-No hay una colección nueva de clientes. `POST /api/clientes` actualiza la cuenta de `sub` del JWT y no admite elegir otra cuenta ni cambiar email, contraseña o rol desde el cuerpo. Nombre, apellido y DNI son obligatorios en esta ruta. Los campos opcionales omitidos se conservan. El GET de compatibilidad devuelve **404** con “Perfil de cliente no encontrado” si el usuario no existe o todavía no tiene DNI: el frontend de referencia usa esa respuesta para abrir el formulario de completar perfil. El perfil canónico `/api/usuarios/me` sigue disponible para cualquier cuenta existente, tenga o no DNI.
+Registro acepta `name` y también `nombre` como nombre de entrada; las respuestas usan únicamente `user.name`, `user.role` y `user.direccion` (texto). PUT admite `name`, `apellido`, `dni`, `telefono` y `direccion`; conserva los campos omitidos para completar el registro sin borrar datos anteriores. Enviar valores idénticos no cambia el resultado funcional. No permite cambiar rol, email, contraseña ni el usuario destino. Esta conservación de campos es una decisión explícita del contrato de actualización usado en PP3.
 
-Se guarda una sola `direccion` como texto. Para la visualización del frontend actual, `/api/clientes/perfil` y `POST /api/clientes` entregan además `direcciones: [{calle: direccion, numero: "", ciudad: "", esPredeterminada: true}]`, o `[]` si no hay dirección. No se separa una dirección libre en campos inventados ni se implementan varias direcciones.
+El GET devuelve 200 para toda cuenta existente, con DNI y dirección en null cuando falten. El 404 de usuario queda reservado a una cuenta que ya no existe. 401 indica JWT ausente, inválido o vencido; 400 indica datos de actualización inválidos. Una ruta inexistente devuelve 404 con `Ruta no encontrada`.
 
-La referencia es [Ecommerce_Frontend_PP3, revisión 4439598](https://github.com/PabloHD2024/Ecommerce_Frontend_PP3/blob/4439598bc4d90bf35a88902c7405a4412f9ef722/app.js). Su formulario de cliente no envía una dirección: ese dato aparece solo en checkout y se manda a Pedidos como `direccionEntrega`. Usuarios permite guardarla cuando el consumidor envía `direccion`, pero no puede recuperar automáticamente el cuerpo enviado a otro servicio. El formulario de registro referencia permite contraseñas de 6 caracteres; Usuarios mantiene el mínimo de 8 y rechaza las más cortas con 400.
+Se retiraron `/api/usuarios/auth/register`, `/api/usuarios/auth/login`, `/api/clientes`, `/api/clientes/perfil` y PATCH del perfil propio. Frontend y Gateway deben adoptar las rutas de la tabla. El frontend guarda `token`, lee `user` y recupera la sesión consultando GET `/api/usuarios/me` tras recargar; un 401 requiere borrar la sesión local. No debe esperar un 404 para permitir editar datos incompletos. El formulario debe exigir contraseña de al menos 8 caracteres.
 
-El Gateway pendiente debe reenviar `/api/usuarios` y todos sus subrecursos, `/api/sesiones` y `/api/clientes` y sus subrecursos a Usuarios, conservando método (incluido PATCH), JSON, query y Authorization. Debe permitir CORS para el origen del frontend. Implementar estos cambios en Usuarios no crea ni configura el Gateway. Las rutas de Catálogo y Pedidos y la persistencia del carrito del frontend no se modifican con esta ampliación.
+El Gateway debe reenviar `/api/usuarios` con sus subrecursos y `/api/sesiones`, conservar métodos (incluido PUT), cuerpo JSON, query y Authorization, y configurar CORS para el frontend. No se modifica el Gateway desde este repositorio.
+
+Correcciones de otros componentes: Catálogo ya implementa el filtrado SQL con `GET /api/productos?categoria=...&nombre=...&page=1&limit=6` y devuelve `items` y `pagination`. El frontend debe enviar esas queries, usar la categoría exacta y reiniciar page a 1 al cambiar el filtro; no filtrar solo los productos de una página en memoria. La ruta de Pedidos solicitada por el docente es GET `/api/pedido`, con usuario obtenido del JWT. Debe acordarse y aplicarse en Pedidos y Gateway, no implementarse dentro de Usuarios. El 503 observado requiere revisar la conexión a ese servicio además de corregir su URL.
 
 ### Comprobación manual en Render
 
