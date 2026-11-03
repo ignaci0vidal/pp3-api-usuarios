@@ -33,6 +33,31 @@ function publicUser(user) {
   };
 }
 
+function frontendUser(user) {
+  return { ...publicUser(user), nombre: user.name, rol: user.role };
+}
+
+function clientProfile(user) {
+  return {
+    ...frontendUser(user),
+    direcciones: user.direccion ? [{ calle: user.direccion, numero: '', ciudad: '', esPredeterminada: true }] : [],
+  };
+}
+
+function authorizeUser(req, res, next) {
+  const token = req.get('authorization')?.match(/^Bearer (.+)$/)?.[1];
+  if (!token) return res.status(401).json({ success: false, message: 'Autenticación requerida' });
+  try {
+    req.claims = jwt.verify(token, process.env.JWT_SECRET);
+    return next();
+  } catch (error) {
+    if (error.name === 'JsonWebTokenError' || error.name === 'TokenExpiredError') {
+      return res.status(401).json({ success: false, message: 'Token inválido o expirado' });
+    }
+    return next(error);
+  }
+}
+
 function createApp({ UserModel = User, connectionState = () => mongoose.connection.readyState } = {}) {
   const app = express();
   app.use(express.json({ limit: '256kb' }));
@@ -45,8 +70,9 @@ function createApp({ UserModel = User, connectionState = () => mongoose.connecti
     });
   });
 
-  app.post('/api/usuarios', async (req, res) => {
-    const { name, apellido, email, password, telefono } = req.body || {};
+  app.post(['/api/usuarios', '/api/usuarios/auth/register'], async (req, res) => {
+    const { apellido, email, password, telefono } = req.body || {};
+    const name = req.body?.name ?? (req.path === '/api/usuarios/auth/register' ? req.body?.nombre : undefined);
     const normalizedEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
     if (typeof name !== 'string' || !name.trim() || typeof apellido !== 'string' || !apellido.trim()
       || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail) || typeof password !== 'string') {
@@ -86,7 +112,7 @@ function createApp({ UserModel = User, connectionState = () => mongoose.connecti
     }
   });
 
-  app.post('/api/sesiones', async (req, res) => {
+  app.post(['/api/sesiones', '/api/usuarios/auth/login'], async (req, res) => {
     const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
     const { password } = req.body || {};
     if (!email || typeof password !== 'string' || !password) {
@@ -106,7 +132,10 @@ function createApp({ UserModel = User, connectionState = () => mongoose.connecti
         email: details.email,
         role: details.role,
       }, process.env.JWT_SECRET, { expiresIn: '2h' });
-      return res.status(201).json({ success: true, message: 'Sesión creada', token, user: details });
+      return res.status(201).json({
+        success: true, message: 'Sesión creada', token, user: details,
+        ...(req.path === '/api/usuarios/auth/login' ? { usuario: frontendUser(user) } : {}),
+      });
     } catch (error) {
       console.error('Session creation failed:', error);
       return res.status(500).json({ success: false, message: 'Error al iniciar sesión' });
@@ -157,6 +186,46 @@ function createApp({ UserModel = User, connectionState = () => mongoose.connecti
       }
       console.error('Profile update failed:', error);
       return res.status(500).json({ success: false, message: 'Error al actualizar el perfil' });
+    }
+  });
+
+  // Compatibility with the existing storefront: same account and database,
+  // not a separate customer collection. A DNI marks a completed client profile.
+  app.get('/api/clientes/perfil', authorizeUser, async (req, res) => {
+    try {
+      const user = await UserModel.findById(req.claims.sub);
+      if (!user || !user.dni) return res.status(404).json({ message: 'Perfil de cliente no encontrado' });
+      return res.json(clientProfile(user));
+    } catch (error) {
+      console.error('Client profile lookup failed:', error);
+      return res.status(500).json({ message: 'Error al consultar el perfil de cliente' });
+    }
+  });
+
+  app.post('/api/clientes', authorizeUser, async (req, res) => {
+    const body = req.body || {};
+    if (typeof body.nombre !== 'string' || !body.nombre.trim()
+      || typeof body.apellido !== 'string' || !body.apellido.trim()) {
+      return res.status(400).json({ message: 'Nombre y apellido son obligatorios' });
+    }
+    const profile = validateProfileFields(body);
+    if (profile.error) return res.status(400).json({ message: profile.error });
+    if (!profile.fields.dni) return res.status(400).json({ message: 'El DNI es obligatorio para completar el perfil de cliente' });
+    if (body.telefono !== undefined) {
+      if (body.telefono !== null && (typeof body.telefono !== 'string' || !/^\d*$/.test(body.telefono.trim()))) {
+        return res.status(400).json({ message: 'El teléfono debe ser texto con solo números' });
+      }
+      profile.fields.telefono = body.telefono?.trim() || null;
+    }
+    try {
+      const user = await UserModel.findByIdAndUpdate(req.claims.sub, {
+        $set: { name: body.nombre.trim(), apellido: body.apellido.trim(), ...profile.fields },
+      }, { new: true, runValidators: true });
+      if (!user) return res.status(404).json({ message: 'Usuario no encontrado' });
+      return res.json(clientProfile(user));
+    } catch (error) {
+      console.error('Client profile update failed:', error);
+      return res.status(500).json({ message: 'Error al guardar el perfil de cliente' });
     }
   });
 

@@ -409,9 +409,24 @@ La ampliación de perfil agrega pruebas HTTP de registro, sesión, consulta y ed
 
 ### Contrato para el frontend del equipo
 
-El frontend debe registrar con `POST /api/usuarios` y campo `name` (no `nombre`), iniciar sesión con `POST /api/sesiones` y leer `token` y `user`. El perfil se consulta con `GET /api/usuarios/me` y se edita con `PATCH /api/usuarios/me`, ambos con Bearer. Los campos de respuesta son `name`, `role` y `direccion` como texto único. No se implementa un servicio separado `/api/clientes` ni un arreglo `direcciones`.
+El contrato original se conserva: registro con `POST /api/usuarios` y `name`, sesión con `POST /api/sesiones` y respuesta `token` y `user`, y perfil con `GET /api/usuarios/me` y `PATCH /api/usuarios/me`. Los campos originales siguen siendo `name`, `role` y `direccion` como texto único.
 
-El Gateway pendiente debe reenviar `/api/usuarios` y todos sus subrecursos, y `/api/sesiones`, conservando método (incluido PATCH), JSON, query y Authorization. Debe permitir CORS para el origen del frontend. Implementar estos cambios en Usuarios no crea ni configura el Gateway.
+Para que el frontend de referencia no necesite cambiar sus llamadas, esta misma API agrega:
+
+| Método | Ruta compatible | Comportamiento |
+| --- | --- | --- |
+| POST | `/api/usuarios/auth/register` | Acepta `nombre`, `apellido`, `email` y `password`; siempre registra `client` |
+| POST | `/api/usuarios/auth/login` | Mismo login; agrega `usuario` con `nombre` y `rol`, manteniendo `token` y `user` |
+| GET | `/api/clientes/perfil` | Bearer; devuelve el perfil directamente con DNI, teléfono y `direcciones` |
+| POST | `/api/clientes` | Bearer; completa el usuario autenticado con `nombre`, `apellido`, `dni`, y opcionalmente `telefono` y `direccion`; devuelve 200 |
+
+No hay una colección nueva de clientes. `POST /api/clientes` actualiza la cuenta de `sub` del JWT y no admite elegir otra cuenta ni cambiar email, contraseña o rol desde el cuerpo. Nombre, apellido y DNI son obligatorios en esta ruta. Los campos opcionales omitidos se conservan. El GET de compatibilidad devuelve **404** con “Perfil de cliente no encontrado” si el usuario no existe o todavía no tiene DNI: el frontend de referencia usa esa respuesta para abrir el formulario de completar perfil. El perfil canónico `/api/usuarios/me` sigue disponible para cualquier cuenta existente, tenga o no DNI.
+
+Se guarda una sola `direccion` como texto. Para la visualización del frontend actual, `/api/clientes/perfil` y `POST /api/clientes` entregan además `direcciones: [{calle: direccion, numero: "", ciudad: "", esPredeterminada: true}]`, o `[]` si no hay dirección. No se separa una dirección libre en campos inventados ni se implementan varias direcciones.
+
+La referencia es [Ecommerce_Frontend_PP3, revisión 4439598](https://github.com/PabloHD2024/Ecommerce_Frontend_PP3/blob/4439598bc4d90bf35a88902c7405a4412f9ef722/app.js). Su formulario de cliente no envía una dirección: ese dato aparece solo en checkout y se manda a Pedidos como `direccionEntrega`. Usuarios permite guardarla cuando el consumidor envía `direccion`, pero no puede recuperar automáticamente el cuerpo enviado a otro servicio. El formulario de registro referencia permite contraseñas de 6 caracteres; Usuarios mantiene el mínimo de 8 y rechaza las más cortas con 400.
+
+El Gateway pendiente debe reenviar `/api/usuarios` y todos sus subrecursos, `/api/sesiones` y `/api/clientes` y sus subrecursos a Usuarios, conservando método (incluido PATCH), JSON, query y Authorization. Debe permitir CORS para el origen del frontend. Implementar estos cambios en Usuarios no crea ni configura el Gateway. Las rutas de Catálogo y Pedidos y la persistencia del carrito del frontend no se modifican con esta ampliación.
 
 ### Comprobación manual en Render
 
